@@ -1,12 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, AsyncGenerator
 
 import aiohttp
 import structlog
 
-from annatar import instrumentation
-from annatar.database import db
-from annatar.debrid import magnet
+from annatar import instrumentation, magnet
 from annatar.debrid.rd_models import InstantFile, TorrentInfo, UnrestrictedLink
 
 ROOT_URL = "https://api.real-debrid.com/rest/1.0"
@@ -40,6 +38,15 @@ async def make_request(
             method, api_url, headers=api_headers, data=body
         ) as response:
             status_code = f"{response.status//100}xx"
+            if response.status in [401, 403]:
+                log.warning(
+                    "RD token is invalid",
+                    status=response.status,
+                    reason=response.reason,
+                    url=api_url,
+                    body=await response.text(),
+                )
+                return None
             if response.status not in range(200, 300):
                 error = True
                 log.error(
@@ -79,11 +86,6 @@ async def get_instant_availability(
     info_hash: str,
     debrid_token: str,
 ) -> AsyncGenerator[list[InstantFile], None]:
-    cache_key = f"rd:instant_availability:{info_hash}"
-    cached = await db.get(cache_key)
-    if cached == "0":
-        return
-
     res = await make_request(
         method="GET",
         url="/torrents/instantAvailability/{info_hash}",
@@ -91,7 +93,7 @@ async def get_instant_availability(
         debrid_token=debrid_token,
     )
     if res is None:
-        await db.set(cache_key, "0", ttl=timedelta(hours=1))
+        log.debug("No instant availability", info_hash=info_hash)
         return
 
     for hash, obj in res.items():
@@ -103,16 +105,16 @@ async def get_instant_availability(
             cached_files = [
                 InstantFile(id=int(file_id), **file_info) for file_id, file_info in set.items()
             ]
-            log.info("found cached files", count=len(cached_files))
-            await db.set(cache_key, "1", ttl=timedelta(hours=1))
+            log.info("found cached files", count=len(cached_files), info_hash=info_hash)
             yield cached_files
 
 
-async def list_torrents(debrid_token: str) -> list[TorrentInfo]:
+async def list_torrents(debrid_token: str, page: int = 1, limit: int = 50) -> list[TorrentInfo]:
     response_json = await make_request(
         method="GET",
         url="/torrents",
         debrid_token=debrid_token,
+        url_values={"page": str(page), "limit": str(limit)},
     )
     if not response_json:
         return []

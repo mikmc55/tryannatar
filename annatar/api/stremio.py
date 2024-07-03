@@ -11,6 +11,8 @@ from starlette.status import HTTP_302_FOUND
 from annatar import config
 from annatar.api.core import streams
 from annatar.config import UserConfig
+from annatar.debrid.alldebrid import AllDebridProvider
+from annatar.debrid.debridlink import DebridLink
 from annatar.debrid.models import StreamLink
 from annatar.debrid.providers import DebridService, get_provider
 from annatar.debrid.real_debrid_provider import RealDebridProvider
@@ -68,7 +70,11 @@ def get_source_ip(request: Request) -> str:
 
 @router.get("/{b64config:str}/manifest.json")
 async def get_manifest(request: Request, b64config: str) -> dict[str, Any]:
-    user_config: UserConfig = config.parse_config(b64config)
+    try:
+        user_config: UserConfig = config.parse_config(b64config)
+    except Exception as e:
+        log.error("Error parsing config", exc_info=e)
+        raise HTTPException(status_code=400, detail="Invalid configuration") from e
     debrid: Optional[DebridService] = get_provider(
         provider_name=user_config.debrid_service,
         api_key=user_config.debrid_api_key,
@@ -108,10 +114,62 @@ async def get_hashes(
     }
 
 
-@router.get(
+@router.api_route(
+    "/ad/{api_key}/{info_hash}/{file_name}",
+    response_model=StreamResponse,
+    response_model_exclude_none=True,
+    methods=["GET"],
+)
+async def get_ad_stream(
+    request: Request,
+    api_key: Annotated[str, Path(description="Debrid token")],
+    info_hash: Annotated[str, Path(description="Torrent info hash")],
+    file_name: Annotated[str, Path(description="Name of the file in the torrent")],
+) -> RedirectResponse:
+    debrid: AllDebridProvider = AllDebridProvider(api_key=api_key, source_ip=get_source_ip(request))
+    stream: StreamLink | None = await debrid.get_stream_for_torrent(
+        info_hash=info_hash,
+        file_name=file_name,
+    )
+    if not stream:
+        raise HTTPException(status_code=404, detail="No stream found")
+    return RedirectResponse(url=stream.url, status_code=HTTP_302_FOUND)
+
+
+@router.api_route(
+    "/dl/{api_key}/{info_hash}/{file_name}",
+    response_model=StreamResponse,
+    response_model_exclude_none=True,
+    methods=["GET"],
+)
+async def get_dl_stream(
+    request: Request,
+    api_key: Annotated[str, Path(description="Debrid token")],
+    info_hash: Annotated[str, Path(description="Torrent info hash")],
+    file_name: Annotated[str, Path(description="Name of the file in the torrent")],
+) -> RedirectResponse:
+    debrid: DebridLink = DebridLink(api_key=api_key, source_ip=get_source_ip(request))
+    stream: StreamLink | None = await debrid.get_stream_for_torrent(
+        info_hash=info_hash,
+        file_name=file_name,
+    )
+    if not stream:
+        raise HTTPException(status_code=404, detail="No stream found")
+    return RedirectResponse(url=stream.url, status_code=HTTP_302_FOUND)
+
+
+@router.api_route(
+    # we don't use the file name, but Stremio uses it for Trakt and Opensubtitles lookups
+    "/rd/{debrid_api_key:str}/{info_hash:str}/{file_id:int}/{file_name:str}",
+    response_model=StreamResponse,
+    response_model_exclude_none=True,
+    methods=["GET"],
+)
+@router.api_route(
     "/rd/{debrid_api_key:str}/{info_hash:str}/{file_id:int}",
     response_model=StreamResponse,
     response_model_exclude_none=True,
+    methods=["GET"],
 )
 async def get_rd_stream(
     request: Request,
@@ -152,7 +210,11 @@ async def list_streams(
     ],
     b64config: Annotated[str, Path(description="base64 encoded json blob")],
 ) -> StreamResponse:
-    user_config: UserConfig = config.parse_config(b64config)
+    try:
+        user_config: UserConfig = config.parse_config(b64config)
+    except Exception as e:
+        log.error("Error parsing config", exc_info=e)
+        raise HTTPException(status_code=400, detail="Invalid configuration") from e
     debrid: Optional[DebridService] = get_provider(
         provider_name=user_config.debrid_service,
         api_key=user_config.debrid_api_key,
@@ -169,8 +231,7 @@ async def list_streams(
         imdb_id=imdb_id,
         season_episode=season_episode,
         max_results=user_config.max_results,
-        indexers=user_config.indexers,
-        resolutions=user_config.resolutions,
+        filters=user_config.filters,
     )
 
     for stream in res.streams:

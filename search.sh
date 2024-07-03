@@ -17,6 +17,10 @@ if [ "${provider}" == "real_debrid" ]; then
 	debrid_api_key=$(op read "op://Personal/Real-debrid/API Token")
 elif [ "${provider}" == "premiumize" ]; then
 	debrid_api_key=$(op read "op://Personal/Premiumize.me/API Key")
+elif [ "${provider}" == "debridlink" ]; then
+	debrid_api_key=$(op read "op://Personal/sbu7y6nvqvcx3inmrodr6436ce/credential")
+elif [ "${provider}" == "alldebrid" ]; then
+	debrid_api_key=$(op read "op://Personal/cesntgi2zvhhiek4dkqbojr47u/Stremio API Key")
 else
 	echo "Invalid provider: ${provider}"
 	exit 1
@@ -27,8 +31,7 @@ config=$(cat <<-EOF | jq -c . | base64 -w0
 	"debrid_service": "${provider}",
 	"debrid_api_key": "${debrid_api_key}",
 	"max_results": ${max_results},
-	"indexers": ["yts", "eztv", "kickasstorrents-ws", "thepiratebay", "therarbg", "torrentgalaxy", "bitsearch", "limetorrents", "badasstorrents"],
-	"resolutions": ["720p", "1080p", "4K"]
+	"filters": ["yts"]
 }
 
 EOF

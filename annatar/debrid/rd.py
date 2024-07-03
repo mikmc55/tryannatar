@@ -2,6 +2,7 @@ import asyncio
 from datetime import timedelta
 from hashlib import sha256
 from typing import AsyncGenerator, Optional
+from urllib.parse import quote_plus
 
 import structlog
 
@@ -27,12 +28,14 @@ async def find_streamable_file_id(
     files: list[TorrentFile],
     season: int = 0,
     episode: int = 0,
-) -> int | None:
+) -> TorrentFile | None:
     if len(files) == 0:
         log.debug("No files, returning 0")
         return None
 
-    video_files: list[TorrentFile] = [file for file in files if human.is_video(file.path)]
+    video_files: list[TorrentFile] = [
+        file for file in files if human.is_video(file.path, file.bytes)
+    ]
     if len(video_files) < 1:
         log.debug("release has no video files")
         return None
@@ -40,12 +43,14 @@ async def find_streamable_file_id(
     sorted_files: list[TorrentFile] = sorted(video_files, key=lambda f: f.bytes, reverse=True)
     if not season or not episode:
         log.debug("returning biggest file", file=sorted_files[0])
-        return sorted_files[0].id if human.is_video(sorted_files[0].path) else None
+        return (
+            sorted_files[0] if human.is_video(sorted_files[0].path, sorted_files[0].bytes) else None
+        )
 
     for file in sorted_files:
         path = file.path.lower()
         if human.match_season_episode(season=season, episode=episode, file=path):
-            if not human.is_video(path):
+            if not human.is_video(path, file.bytes):
                 continue
             log.info(
                 "found matched file for season/episode",
@@ -53,7 +58,7 @@ async def find_streamable_file_id(
                 season=season,
                 episode=episode,
             )
-            return file.id
+            return file
     log.info(
         "No file found for season/episode",
         season=season,
@@ -113,29 +118,39 @@ async def _get_stream_for_torrent(
         log.error("cached torrent not found", info_hash=info_hash)
         return None
 
-    torrent_id: Optional[str] = await api.add_magnet(
-        info_hash=info_hash,
-        debrid_token=debrid_token,
-        source_ip=source_ip,
-    )
+    torrent_id: Optional[str] = None
+
+    if existing_torrents := await api.list_torrents(debrid_token=debrid_token, limit=100):
+        log.debug("existing torrents found", count=len(existing_torrents))
+        for t in existing_torrents:
+            if t.hash.casefold() == info_hash.casefold():
+                log.debug("torrent already exists", info_hash=info_hash)
+                torrent_id = t.id
+                break
 
     if not torrent_id:
-        log.info("no torrent id found")
-        return None
+        torrent_id = await api.add_magnet(
+            info_hash=info_hash,
+            debrid_token=debrid_token,
+            source_ip=source_ip,
+        )
+        log.info("magnet added to RD", torrent_id=torrent_id)
 
-    log.info("magnet added to RD", torrent_id=torrent_id)
+        if not torrent_id:
+            log.info("no torrent id found")
+            return None
 
-    log.info("selecting instant file set in torrent", torrent_id=torrent_id, file_id=file_id)
-    selected: bool = await api.select_torrent_files(
-        torrent_id=torrent_id,
-        debrid_token=debrid_token,
-        file_ids=file_set.file_ids,
-        source_ip=source_ip,
-    )
-    if selected:
-        log.info("Selected torrent file set", torrent_id=torrent_id, file_id=file_id)
-    else:
-        log.error("Failed to select torrent file set", torrent_id=torrent_id, file_id=file_id)
+        log.info("selecting instant file set in torrent", torrent_id=torrent_id, file_id=file_id)
+        selected: bool = await api.select_torrent_files(
+            torrent_id=torrent_id,
+            debrid_token=debrid_token,
+            file_ids=file_set.file_ids,
+            source_ip=source_ip,
+        )
+        if selected:
+            log.info("Selected torrent file set", torrent_id=torrent_id, file_id=file_id)
+        else:
+            log.error("Failed to select torrent file set", torrent_id=torrent_id, file_id=file_id)
 
     torrent_link: str | None = await get_torrent_link(
         torrent_id=torrent_id,
@@ -168,7 +183,7 @@ async def get_stream_for_torrent(
     file_id: int,
     debrid_token: str,
     source_ip: str,
-) -> Optional[StreamLink]:
+    Optional[StreamLink]:
     """
     Get the stream link for a torrent and file.
     """
@@ -203,8 +218,9 @@ async def get_stream_link(
     debrid_token: str,
     season: int = 0,
     episode: int = 0,
-) -> StreamLink | None:
+    StreamLink | None:
     info_hash = info_hash.upper()
+    eru/fuzzy-match-title
     cache_key: str = f"rd:stream_link:torrent:{info_hash}"
     if season and episode:
         cache_key += f":{season}:{episode}"
@@ -212,6 +228,7 @@ async def get_stream_link(
         log.debug("Cached stream link found", link=cache)
         return cache
 
+    master
     async for cached_files in api.get_instant_availability(
         info_hash,
         debrid_token,
@@ -227,42 +244,42 @@ async def get_stream_link(
             )
             for f in cached_files
         ]
-        file_id: int | None = await find_streamable_file_id(
+        torrent_file: TorrentFile | None = await find_streamable_file_id(
             files=torrent_files,
             season=season,
             episode=episode,
         )
 
-        if not file_id:
+        if not torrent_file:
             log.debug("set does not contain a suitable file")
             continue
 
-        file: InstantFile | None = next((f for f in cached_files if f.id == file_id), None)
+        file: InstantFile | None = next((f for f in cached_files if f.id == torrent_file.id), None)
         if not file:
             log.error(
                 "cached file set does not contain the desired file_id. This should not be possible",
                 torrent=info_hash,
-                file_id=file_id,
+                file_id=torrent_file.id,
             )
             return None
 
         log.debug("found matching instantAvailable set")
+        # urlencode the filename
+        filename = quote_plus(torrent_file.path.split("/")[-1])
         # this route has to match the route provided to provide the 302
-        url: str = f"/rd/{debrid_token}/{info_hash}/{file_id}"
+        url: str = f"/rd/{debrid_token}/{info_hash}/{torrent_file.id}/{filename}"
 
         await db.set_model(
-            key=f"rd:instant_file_set:torrent:{info_hash}:{file_id}",
+            key=f"rd:instant_file_set:torrent:{info_hash}:{torrent_file.id}",
             model=InstantFileSet(file_ids=[f.id for f in cached_files]),
             ttl=timedelta(hours=8),
         )
 
-        stream_link = StreamLink(
+        return StreamLink(
             size=file.filesize,
             name=file.filename,
             url=url,
         )
-        await db.set_model(cache_key, stream_link, ttl=timedelta(hours=8))
-        return stream_link
     return None
 
 

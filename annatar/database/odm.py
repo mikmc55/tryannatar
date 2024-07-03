@@ -10,6 +10,7 @@ from datetime import timedelta
 import structlog
 
 from annatar import torrent
+from annatar.api.filters import Filter
 from annatar.database import db
 from annatar.pubsub.events import TorrentAdded
 
@@ -41,6 +42,9 @@ async def add_torrent(
     imdb: str,
     score: int,
     ttl: timedelta,
+    category: str,
+    size: int,
+    indexer: str,
     season: int | None = None,
     episode: int | None = None,
 ) -> bool:
@@ -60,6 +64,9 @@ async def add_torrent(
                 imdb=imdb,
                 season=season,
                 episode=episode,
+                category=category,
+                size=size,
+                indexer=indexer,
             )
         )
     return bool(added)
@@ -70,21 +77,37 @@ async def list_torrents(
     limit: int = sys.maxsize,
     season: int | None = None,
     episode: int | None = None,
-    resolutions: list[str] | None = None,
+    filters: list[Filter] | None = None,
 ) -> list[str]:
+    if filters is None:
+        filters = []
     keys = set([Keys.torrents(imdb, season, episode), Keys.torrents(imdb, season)])
     log.debug("looking up torrents", keys=keys, limit=limit)
     results: list[db.ScoredItem] = []
     for key in keys:
         for item in await db.unique_list_get_scored(name=key):
-            if resolutions and torrent.get_resolution(item.score) not in resolutions:
-                continue
+            if filters:
+                title = await get_torrent_title(item.value)
+                if not title:
+                    continue
+                meta = torrent.TorrentMeta.parse_title(title)
+                if any(f.apply(meta) for f in filters):
+                    log.debug(
+                        "filtered torrent", title=title, filters=[f.id for f in filters], meta=meta
+                    )
+                    continue
             results.append(item)
             if len(results) >= limit:
                 break
 
     log.info("found torrents", count=len(results))
-    return list([item.value for item in sorted(results, key=lambda x: x.score, reverse=True)])
+    return list(
+        [
+            item.value
+            for item in sorted(results, key=lambda x: x.score, reverse=True)
+            if len(item.value) == 40
+        ]
+    )
 
 
 async def set_torrent_title(info_hash: str, title: str) -> bool:
