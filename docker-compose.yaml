@@ -6,9 +6,8 @@ volumes:
 
 services:
   annatar:
-    image: docker.io/mikmc/annatar:latest1
-    ports:
-      - "8000:8000"
+    build:
+      dockerfile: Dockerfile
     depends_on:
       - jackett
     volumes:
