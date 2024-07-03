@@ -6,7 +6,8 @@ volumes:
 
 services:
   annatar:
-    image: docker.io/mikmc/annatar:latest
+    build:
+      dockerfile: Dockerfile  # Path to your Dockerfile
     ports:
       - "8000:8000"
     depends_on:
