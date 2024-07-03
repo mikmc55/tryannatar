@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: my-web-service
+    env: docker
+    plan: free
+    image: docker.io/mikmc/annatar:latest1
+    envVars:
+      - key: PORT
+        value: "8000"
+    healthCheckPath: "/"
+    autoDeploy: true
