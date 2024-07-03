@@ -10,17 +10,9 @@ from annatar import config
 
 log = structlog.get_logger(__name__)
 
-# Space required for values
-# 1 bit:  2 values  (0 to 1) # good for boolean flags like HDR or Year
-# 2 bits: 4 values  (0 to 3)
-# 3 bits: 8 values  (0 to 7)
-# 4 bits: 16 values  (0 to 15)
-# I'm not using any more than this. 8 is far too wide a decision tree
-
-eru/fuzzy-match-title
+# Constants
 NAME_MATCH_BIT_POS = 24
 TRASH = ["Cam", "Telesync", "Telecine", "Screener", "Workprint"]
-master
 SEASON_MATCH_BIT_POS = 20
 RESOLUTION_BIT_POS = 14
 AUDIO_BIT_POS = 8
@@ -29,35 +21,25 @@ YEAR_MATCH_BIT_POS = 6
 RESOLUTION_SCORES = {
     "720p": 1,
     "1080p": 2,
-    # QHD
     "QHD": 3,
-    # 4K
     "4K": 4,
-    # 5K
     "5K": 5,
-    # 8K
     "8K": 6,
 }
 RESOLUTION_BITS_LENGTH = 3
 
-
 def max_resolution_score(resolution: str) -> int:
     return (score_resolution(resolution) + 1 << RESOLUTION_BIT_POS) - 1
 
-
 def min_resolution_score(resolution: str) -> int:
     return score_resolution(resolution) << RESOLUTION_BIT_POS
-
 
 def score_resolution(resolution: str) -> int:
     """
     Gives the resolution a score between 0 and (RESOLUTION_BITS_LENGTH^2)-1
     Higher number is better
     """
-    if resolution in RESOLUTION_SCORES:
-        return RESOLUTION_SCORES[resolution]
-    return 0
-
+    return RESOLUTION_SCORES.get(resolution, 0)
 
 def get_resolution(score: int) -> str:
     mask = ((1 << RESOLUTION_BITS_LENGTH) - 1) << RESOLUTION_BIT_POS
@@ -66,7 +48,6 @@ def get_resolution(score: int) -> str:
         if value == resolution_value:
             return resolution
     return "Unknown"
-
 
 class Category(str, Enum):
     Movie = "movie"
@@ -81,7 +62,6 @@ class Category(str, Enum):
         if self == Category.Series:
             return 5000
         raise ValueError(f"Unknown category {self}")
-
 
 class TorrentMeta(BaseModel):
     title: str
@@ -108,36 +88,24 @@ class TorrentMeta(BaseModel):
     @field_validator("resolution", mode="before")
     @classmethod
     def standardize_resolution(cls: Any, v: Any):
-        if v is None:
-            return ""
-        if isinstance(v, bytes):
-            v = v.decode("utf-8")
-
         if isinstance(v, str):
-            if v.lower() == "1440p":
-                return "QHD"
-            if v.lower() == "2160p":
-                return "4K"
-            if v.lower() == "2880p":
-                return "5K"
-            if v.lower() == "4320p":
-                return "8K"
-            return v
+            return {
+                "1440p": "QHD",
+                "2160p": "4K",
+                "2880p": "5K",
+                "4320p": "8K"
+            }.get(v.lower(), v)
         if isinstance(v, list):
-            return [x for x in [cls.standardize_resolution(r) for r in v if r] if x]
+            return [cls.standardize_resolution(r) for r in v if r]
         return v
 
     @field_validator("imdb", mode="before")
     @classmethod
     def fix_imdb_id(cls: Any, v: Any):
-        if v is None:
-            return None
         if isinstance(v, int):
             return f"tt{v:07d}"
         if isinstance(v, str):
-            if v.startswith("tt"):
-                return v
-            return f"tt{int(v):07d}"
+            return v if v.startswith("tt") else f"tt{int(v):07d}"
         return v
 
     def with_info_hash(self, info_hash: str) -> "Torrent":
@@ -163,48 +131,24 @@ class TorrentMeta(BaseModel):
         return any(x in self.quality for x in TRASH)
 
     def score_series(self, season: int, episode: int) -> int:
-        """
-        Score a torrent based on season and episode where the rank is as follows:
-           3 -> Whole series matches
-           2 -> Whole season matches
-           1 -> Single episode matches
-           0 -> No match at all
-        -100 -> Mismatch Season
-         -10 -> Mismatch Episode
-          -1 -> Unknown mismatch
-        """
         if not season and not episode:
-            # no season or episode. Probably a movie
             return 0
         if self.season and season not in self.season:
-            # season mismatch
             return -100
         if self.episode and episode not in self.episode:
-            # episode mismatch
             return -10
         if not self.season and not self.episode:
-            # no season or episode
             return 0
         if len(self.season) > 1 and season in self.season:
-            # series matches
             return 3
         if season in self.season and not self.episode:
-            # whole season matches
             return 2
         if season in self.season and episode in self.episode:
-            # single episode matches
             return 1
         return -1
 
     def matches_name(self, title: str) -> bool:
-        eru/fuzzy-match-title
-        return (
-            Levenshtein.ratio(self.title.lower(), title.lower())
-            >= config.TORRENT_TITLE_MATCH_THRESHOLD
-        )
-
-        return Levenshtein.ratio(self.title.lower(), title.lower()) > 0.9
-        master
+        return Levenshtein.ratio(self.title.lower(), title.lower()) >= config.TORRENT_TITLE_MATCH_THRESHOLD
 
     @property
     def score(self):
@@ -247,36 +191,28 @@ class TorrentMeta(BaseModel):
         result: int = season_match_score | resolution_score | audio_score | year_match_score
         return result
 
-
 class Torrent(TorrentMeta, BaseModel):
     info_hash: str
 
     @field_validator("info_hash", mode="before")
     @classmethod
     def consistent_info_hash(cls: Any, v: Any):
-        if v is None:
-            return None
         if isinstance(v, str):
-            # info_hash needs to be upper case for comparison
             return v.upper()
         return v
 
-
 class TorrentList(BaseModel):
     torrents: list[str]
-
 
 def max_score_for(resolution: str) -> int:
     return Torrent.parse_title(
         title=f"Friends S01-S10 1994 7.1 COMPLETE {resolution}",
     ).match_score(title="Friends", year=1994, season=5, episode=10)
 
-
 def lowest_score_for(resolution: str) -> int:
     return Torrent.parse_title(
         title=f"Oppenheimer {resolution}",
     ).match_score(title="Oppenheimer", year=2022, season=1, episode=1)
-
 
 def score_range_for(resolution: str) -> range:
     return range(lowest_score_for(resolution), max_score_for(resolution) + 1)
