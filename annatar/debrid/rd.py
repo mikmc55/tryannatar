@@ -183,7 +183,7 @@ async def get_stream_for_torrent(
     file_id: int,
     debrid_token: str,
     source_ip: str,
-) -> Optional[StreamLink]:
+    Optional[StreamLink]:
     """
     Get the stream link for a torrent and file.
     """
@@ -218,8 +218,17 @@ async def get_stream_link(
     debrid_token: str,
     season: int = 0,
     episode: int = 0,
-) -> StreamLink | None:
+    StreamLink | None:
     info_hash = info_hash.upper()
+    eru/fuzzy-match-title
+    cache_key: str = f"rd:stream_link:torrent:{info_hash}"
+    if season and episode:
+        cache_key += f":{season}:{episode}"
+    if cache := await db.get_model(cache_key, model=StreamLink):
+        log.debug("Cached stream link found", link=cache)
+        return cache
+
+    master
     async for cached_files in api.get_instant_availability(
         info_hash,
         debrid_token,
