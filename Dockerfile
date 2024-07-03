@@ -1,5 +1,5 @@
 # --- Build Stage ---
-FROM docker.io/python:3.11 as builder
+FROM python:3.11 as builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
