@@ -19,7 +19,6 @@ log = structlog.get_logger(__name__)
 
 eru/fuzzy-match-title
 NAME_MATCH_BIT_POS = 24
-=======
 TRASH = ["Cam", "Telesync", "Telecine", "Screener", "Workprint"]
 master
 SEASON_MATCH_BIT_POS = 20
