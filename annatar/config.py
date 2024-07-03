@@ -21,11 +21,13 @@ BUILD_VERSION: str = os.getenv("BUILD_VERSION", "UNKNOWN")
 ENV = os.getenv("ENV", "dev")
 HOST: str = os.getenv("LISTEN_HOST", "0.0.0.0")
 JACKETT_INDEXERS_LIST = (os.getenv("JACKETT_INDEXERS") or DEFAULT_INDEXERS).split(",")
+ENABLE_COMMUNITY_CACHE = os.getenv("ENABLE_COMMUNITY_CACHE", "true").lower() == "true"
 PORT: int = int(os.getenv("LISTEN_PORT", "8000"))
 PROM_DIR = os.getenv(
     "PROMETHEUS_MULTIPROC_DIR", f"/tmp/annatar.metrics-{datetime.now().timestamp()}"
 )
 VERSION = os.getenv("BUILD_VERSION") or "0.0.1"
+TORRENT_TITLE_MATCH_THRESHOLD = float(os.getenv("TORRENT_TITLE_MATCH_THRESHOLD") or 0.85)
 
 RESOLUTION_FILTERS = [f for f in by_category("Resolution")]
 

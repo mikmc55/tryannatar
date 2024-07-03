@@ -1,19 +1,31 @@
 from typing import Optional
 
+from annatar.debrid.alldebrid import AllDebridProvider
 from annatar.debrid.debrid_service import DebridService
+eru/offcloud-support
 from annatar.debrid.offcloud_provider import OffCloudProvider
+from annatar.debrid.debridlink import DebridLink
+master
 from annatar.debrid.premiumize_provider import PremiumizeProvider
 from annatar.debrid.real_debrid_provider import RealDebridProvider
 
 _providers: list[DebridService] = [
     RealDebridProvider(api_key="", source_ip=""),
     PremiumizeProvider(api_key="", source_ip=""),
+eru/offcloud-support
     OffCloudProvider(api_key="", source_ip=""),
+    DebridLink(api_key="", source_ip=""),
+    AllDebridProvider(api_key="", source_ip=""),
+master
 ]
 
 
 def register_provider(prov: "DebridService"):
     _providers.append(prov)
+
+
+def all_providers() -> list[DebridService]:
+    return _providers
 
 
 def list_providers() -> list[dict[str, str]]:

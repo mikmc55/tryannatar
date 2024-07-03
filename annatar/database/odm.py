@@ -48,6 +48,9 @@ async def add_torrent(
     imdb: str,
     score: int,
     ttl: timedelta,
+    category: str,
+    size: int,
+    indexer: str,
     season: int | None = None,
     episode: int | None = None,
 ) -> bool:
@@ -67,6 +70,9 @@ async def add_torrent(
                 imdb=imdb,
                 season=season,
                 episode=episode,
+                category=category,
+                size=size,
+                indexer=indexer,
             )
         )
     return bool(added)
@@ -101,7 +107,13 @@ async def list_torrents(
                 break
 
     log.info("found torrents", count=len(results))
-    return list([item.value for item in sorted(results, key=lambda x: x.score, reverse=True)])
+    return list(
+        [
+            item.value
+            for item in sorted(results, key=lambda x: x.score, reverse=True)
+            if len(item.value) == 40
+        ]
+    )
 
 
 async def set_torrent_title(info_hash: str, title: str) -> bool:

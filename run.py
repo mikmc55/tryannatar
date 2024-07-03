@@ -31,17 +31,25 @@ def start_torrent_processor(worker_id: int) -> None:
     loop.close()
 
 
-def start_search_processor(indexer: str, worker_id: int) -> None:
+def start_community_cache_processor() -> None:
+    from annatar.pubsub.consumers.community_cache import CommunityCacheProcessor
+
+    loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(CommunityCacheProcessor().run(WORKERS))
+    loop.close()
+
+
+def start_search_processor(indexer: str) -> None:
     from annatar.pubsub.consumers.torrent_search.base_jackett_processor import BaseJackettProcessor
 
     loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    _ = worker_id
     p = BaseJackettProcessor(
         indexer=indexer,
         supports_imdb=True,
         num_workers=WORKERS,
-        queue_size=WORKERS * 2,
+        queue_size=WORKERS * 5,
         categories=[Category.Movie, Category.Series],
     )
     loop.run_until_complete(p.run())
@@ -59,10 +67,18 @@ if __name__ == "__main__":
         )
         thread.start()
 
+    if config.ENABLE_COMMUNITY_CACHE:
+        thread: threading.Thread = threading.Thread(
+            target=start_community_cache_processor,
+            daemon=True,
+            name="community-cache-processor",
+        )
+        thread.start()
+
     for worker_id, indexer in enumerate(config.JACKETT_INDEXERS_LIST):
         thread: threading.Thread = threading.Thread(
             target=start_search_processor,
-            args=(indexer, worker_id),
+            args=(indexer,),
             daemon=True,
             name=f"search-processor-{indexer}-{worker_id}",
         )
@@ -72,6 +88,7 @@ if __name__ == "__main__":
         "annatar.main:app",
         host=config.HOST,
         port=config.PORT,
+        proxy_headers=True,
         reload=False,
         workers=WORKERS,
         loop="uvloop",

@@ -6,6 +6,8 @@ import PTN
 import structlog
 from pydantic import BaseModel, Field, field_validator
 
+from annatar import config
+
 log = structlog.get_logger(__name__)
 
 # Space required for values
@@ -15,7 +17,11 @@ log = structlog.get_logger(__name__)
 # 4 bits: 16 values  (0 to 15)
 # I'm not using any more than this. 8 is far too wide a decision tree
 
+eru/fuzzy-match-title
+NAME_MATCH_BIT_POS = 24
+=======
 TRASH = ["Cam", "Telesync", "Telecine", "Screener", "Workprint"]
+master
 SEASON_MATCH_BIT_POS = 20
 RESOLUTION_BIT_POS = 14
 AUDIO_BIT_POS = 8
@@ -154,6 +160,9 @@ class TorrentMeta(BaseModel):
     def is_season_episode(self, season: int, episode: int) -> bool:
         return self.score_series(season=season, episode=episode) > 0
 
+    def is_trash(self) -> bool:
+        return any(x in self.quality for x in TRASH)
+
     def score_series(self, season: int, episode: int) -> int:
         """
         Score a torrent based on season and episode where the rank is as follows:
@@ -189,7 +198,14 @@ class TorrentMeta(BaseModel):
         return -1
 
     def matches_name(self, title: str) -> bool:
+        eru/fuzzy-match-title
+        return (
+            Levenshtein.ratio(self.title.lower(), title.lower())
+            >= config.TORRENT_TITLE_MATCH_THRESHOLD
+        )
+
         return Levenshtein.ratio(self.title.lower(), title.lower()) > 0.9
+        master
 
     @property
     def score(self):
@@ -209,7 +225,9 @@ class TorrentMeta(BaseModel):
     ) -> int:
         if title and not self.matches_name(title):
             return -1000
-        if any(x in self.quality for x in TRASH):
+        if self.is_trash():
+            return -5000
+        if self.year and year and year not in self.year:
             return -2000
 
         season_match_score = (
