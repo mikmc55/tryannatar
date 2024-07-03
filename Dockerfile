@@ -15,9 +15,12 @@ WORKDIR /app
 # Copy the pyproject.toml and poetry.lock files
 COPY pyproject.toml poetry.lock* /app/
 
+# Debugging step: Print the current directory and list files
+RUN echo "Current directory: $(pwd)" && ls -la
+
 # Install runtime dependencies using Poetry and create wheels for them
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-dev --no-root --no-interaction --no-ansi \
+    && poetry install --only main --no-root --no-interaction --no-ansi \
     && poetry export -f requirements.txt --output requirements.txt --without-hashes \
     && pip wheel --no-cache-dir --no-deps --wheel-dir /tmp/wheels -r requirements.txt
 
